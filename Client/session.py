@@ -29,18 +29,7 @@ class ProxySession:
             try:
                 await asyncio.sleep(Config.POLL_INTERVAL)
 
-                # === Limit upload size per request ===
-                all_data = self.client_to_server.get_all()   # This clears the buffer
-
-                if len(all_data) > Config.MAX_BUFFER_SIZE_UPLINK:
-                    to_send = all_data[:Config.MAX_BUFFER_SIZE_UPLINK]
-                    remaining = all_data[Config.MAX_BUFFER_SIZE_UPLINK:]
-                    if remaining:
-                        self.client_to_server.buffer.appendleft(remaining)
-                        self.client_to_server.total_size = len(remaining)
-                else:
-                    to_send = all_data
-
+                to_send = self.client_to_server.get_up_to(Config.MAX_BUFFER_SIZE_UPLINK)
                 encoded = base64.b64encode(to_send) if to_send else b''
 
                 # Build headers
