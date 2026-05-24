@@ -15,4 +15,4 @@ class Config:
     CONNECTION_TIMEOUT = 25
 
     # Security
-    AUTH_TOKEN = os.getenv("PROXY_AUTH_TOKEN", "change_me_in_production")
+    AUTH_TOKEN = "change_me_in_production"

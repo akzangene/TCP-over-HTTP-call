@@ -12,4 +12,4 @@ class Config:
     MAX_SESSIONS = 50
     
     # Optional: Simple authentication token (you can enhance this)
-    AUTH_TOKEN = os.getenv("PROXY_AUTH_TOKEN", "change_me_in_production")
+    AUTH_TOKEN = "change_me_in_production"
