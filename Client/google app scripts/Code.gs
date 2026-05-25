@@ -4,14 +4,15 @@ const AUTH_TOKEN = "change_me_in_production";   // Must match your Python AUTH_T
 function doPost(e) {
   try {
     // Authentication
-    const auth = e.headers.Authorization
-    if (!auth || !auth.includes(AUTH_TOKEN)) {
+    const token = e.parameter.token;
+    if (!token || token !== AUTH_TOKEN) {
       return HtmlService.createHtmlOutput(JSON.stringify({ e: "unauthorized" }));
     }
 
-    const targetUrl = e.headers["X-Target-Server"];
+    // Target Server
+    const targetUrl = e.parameter.targetServer;
     if (!targetUrl) {
-      return HtmlService.createHtmlOutput(JSON.stringify({ e: "unauthorized" }));
+      return HtmlService.createHtmlOutput(JSON.stringify({ e: "no_target" }));
     }
 
     const options = {
