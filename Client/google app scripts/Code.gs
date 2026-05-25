@@ -4,8 +4,8 @@ const AUTH_TOKEN = "change_me_in_production";   // Must match your Python AUTH_T
 function doPost(e) {
   try {
     // Authentication
-    const token = e.parameter.token;
-    if (!token || token !== AUTH_TOKEN) {
+    const auth = e.parameter["Authorization"]
+    if (!auth || auth !== "Bearer " + AUTH_TOKEN) {
       return HtmlService.createHtmlOutput(JSON.stringify({ e: "unauthorized" }));
     }
 
@@ -17,7 +17,13 @@ function doPost(e) {
 
     const options = {
       method: "post",
-      headers: e.headers,
+      headers: {
+        "Authorization": auth,
+        "X-Session-ID": e.parameter["X-Session-ID"],
+        "X-Target-Host": e.parameter["X-Target-Host"],
+        "X-Target-Port": e.parameter["X-Target-Port"],
+        "X-Max-Response-Size": e.parameter["X-Max-Response-Size"]
+      },
       payload: e.postData.contents,
       muteHttpExceptions: true,
       followRedirects: false,

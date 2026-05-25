@@ -107,7 +107,14 @@ class ProxySession:
                     # Simple round-robin without storing index in config
                     url = Config.RELAY_URLS[self.current_relay_index]
                     self.current_relay_index = (self.current_relay_index + 1) % len(Config.RELAY_URLS)
-                    params = {"token": Config.AUTH_TOKEN, "targetServer" : Config.SERVER_URL}
+                    params = {
+                        "targetServer" : Config.SERVER_URL,
+                        "Authorization": f"Bearer {Config.AUTH_TOKEN}",
+                        "X-Session-ID": self.session_id,
+                        "X-Target-Host": self.target_host,
+                        "X-Target-Port": str(self.target_port),
+                        "X-Max-Response-Size": str(Config.MAX_BUFFER_SIZE_DOWNLINK),
+                    }
 
                 async with http_session.post(
                     url,
