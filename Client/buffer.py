@@ -26,13 +26,14 @@ class DataBuffer:
     def is_empty(self) -> bool:
         return self.total_size == 0
 
-    def get_up_to(self, max_size: int) -> bytes:
-        """Return up to max_size bytes without removing them from buffer if not fully consumed"""
+    def get_up_to(self, max_size: int) -> tuple[bytes, int]:
+        """Return up to max_size bytes and the exact exhausted size."""
         if not self.buffer or max_size <= 0:
-            return b''
+            return b'', 0
 
         if self.total_size <= max_size:
-            return self.get_all()  # Use existing method for full consumption
+            data = self.get_all()  # Use existing method for full consumption
+            return data, len(data)
 
         # Need to take only part of the data
         data_list = []
@@ -52,6 +53,9 @@ class DataBuffer:
                 remaining = 0
 
         taken_data = b''.join(data_list)
-        self.total_size -= len(taken_data)
+
+        exhausted = len(taken_data)
+
+        self.total_size -= exhausted
         self.last_flush = time.time()
-        return taken_data
+        return taken_data, exhausted

@@ -91,20 +91,26 @@ class LocalProxyServer:
 
                 await asyncio.sleep(Config.POLL_INTERVAL)
 
+                remaining_budget = Config.MAX_BUFFER_SIZE_UPLINK
+
                 payload = []
 
                 for session_id, session in list(self.active_sessions.items()):
 
-                    outgoing = session.client_to_server.get_up_to(
-                        Config.MAX_BUFFER_SIZE_UPLINK
-                    )
+                    outgoing, consumed = session.client_to_server.get_up_to(remaining_budget)
 
                     payload.append({
                         "session_id": session_id,
                         "target_host": session.target_host,
                         "target_port": session.target_port,
-                        "data": base64.b64encode(outgoing).decode(),
+                        "data": base64.b64encode(outgoing).decode()
                     })
+
+                    remaining_budget -= consumed
+
+                    if remaining_budget < 0:
+                        break
+
 
                 if not payload:
                     continue
