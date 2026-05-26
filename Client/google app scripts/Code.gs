@@ -24,7 +24,7 @@ function doPost(e) {
         "X-Target-Port": e.parameter["X-Target-Port"],
         "X-Max-Response-Size": e.parameter["X-Max-Response-Size"]
       },
-      payload: e.postData.contents,
+      payload: e.postData && e.postData.contents,
       muteHttpExceptions: true,
       followRedirects: false,
       escaping: false

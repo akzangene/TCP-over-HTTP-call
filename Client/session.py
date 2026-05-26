@@ -131,7 +131,7 @@ class ProxySession:
                             try:
                                 data = self.load_relay_json(text)
                                 if "e" in data:
-                                    print(f"GAS Relay Error: {data['e']}")
+                                    print(f"GAS Relay Error: {data['e', 'm']}")
                                     await asyncio.sleep(2)
                                     continue
                                 if "s" in data and "b" in data:
