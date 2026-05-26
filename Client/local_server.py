@@ -5,6 +5,7 @@ import uuid
 import struct
 from session import ProxySession
 from config import Config
+import base64
 
 class LocalProxyServer:
     def __init__(self):
@@ -55,19 +56,15 @@ class LocalProxyServer:
             self.active_sessions[session_id] = session
 
         # Start polling task
-            async with aiohttp.ClientSession() as http_session:
-                poll_task = asyncio.create_task(session.poll_server(http_session))
-
-                try:
-                    while True:
-                        data = await reader.read(Config.READ_CHUNK_SIZE)
-                        if not data:
-                            break
-                        session.add_data(data)
-                finally:
-                    poll_task.cancel()
-                    await session.close()
-                    self.active_sessions.pop(session_id, None)
+            try:
+                while True:
+                    data = await reader.read(Config.READ_CHUNK_SIZE)
+                    if not data:
+                        break
+                    session.add_data(data)
+            finally:
+                await session.close()
+                self.active_sessions.pop(session_id, None)
 
         except Exception as e:
             print(f"SOCKS error: {e}")
@@ -75,6 +72,7 @@ class LocalProxyServer:
             writer.close()
 
     async def start(self):
+        asyncio.create_task(self.global_poll_loop())
         server = await asyncio.start_server(
             self.handle_socks, Config.LOCAL_HOST, Config.LOCAL_PORT
         )
@@ -84,3 +82,72 @@ class LocalProxyServer:
 
         async with server:
             await server.serve_forever()
+
+    async def global_poll_loop(self):
+
+        async with aiohttp.ClientSession() as http_session:
+
+            while True:
+
+                await asyncio.sleep(Config.POLL_INTERVAL)
+
+                payload = []
+
+                for session_id, session in list(self.active_sessions.items()):
+
+                    outgoing = session.client_to_server.get_up_to(
+                        Config.MAX_BUFFER_SIZE_UPLINK
+                    )
+
+                    payload.append({
+                        "session_id": session_id,
+                        "target_host": session.target_host,
+                        "target_port": session.target_port,
+                        "data": base64.b64encode(outgoing).decode(),
+                    })
+
+                if not payload:
+                    continue
+
+                print(f"ONE REQUEST -> {len(payload)} sessions")
+
+                try:
+
+                    async with http_session.post(
+                        Config.SERVER_URL,
+                        json={"sessions": payload},
+                        headers={
+                            "Authorization": f"Bearer {Config.AUTH_TOKEN}",
+                            "X-Max-Response-Size": str(Config.MAX_BUFFER_SIZE_DOWNLINK)
+                        },
+                        timeout=Config.CONNECTION_TIMEOUT,
+                    ) as resp:
+
+                        if resp.status != 200:
+                            print("batch failed", resp.status)
+                            continue
+
+                        result = await resp.json()
+
+                        for item in result.get("sessions", []):
+
+                            sid = item["session_id"]
+
+                            if sid not in self.active_sessions:
+                                continue
+
+                            session = self.active_sessions[sid]
+
+                            body = item.get("data", "")
+
+                            if not body:
+                                continue
+
+                            decoded = base64.b64decode(body)
+
+                            if decoded and session.local_writer:
+                                session.local_writer.write(decoded)
+                                await session.local_writer.drain()
+
+                except Exception as e:
+                    print("global poll error", e)

@@ -23,66 +23,59 @@ class ProxyServer:
             if len(self.sessions) > Config.MAX_SESSIONS * 0.8:
                 print(f"Warning: High session count: {len(self.sessions)}")
 
-    async def handle_proxy(self, request: web.Request):
-        if request.method != "POST":
-            return web.Response(status=405)
+    async def handle_batch(self, request: web.Request):
 
         # Simple auth
         token = request.headers.get("Authorization")
         if token != f"Bearer {Config.AUTH_TOKEN}":
             return web.Response(status=401, text="Unauthorized")
 
-        session_id = request.headers.get("X-Session-ID")
-        target_host = request.headers.get("X-Target-Host")
-        target_port = request.headers.get("X-Target-Port")
-        max_response = int(request.headers.get("X-Max-Response-Size"))
+        #1 max_response_size = int(request.headers.get("X-Max-Response-Size"))
 
-        if not session_id or not target_host or not target_port:
-            return web.Response(status=400, text="Missing headers")
-
-        try:
-            target_port = int(target_port)
-        except ValueError:
-            return web.Response(status=400, text="Invalid port")
-
-        # Get or create session
-        if session_id not in self.sessions:
-            if len(self.sessions) >= Config.MAX_SESSIONS:
-                return web.Response(status=503, text="Too many sessions")
-            
-            session = ProxySession(target_host, target_port)
-            if not await session.connect_to_target():
-                return web.Response(status=502, text="Cannot connect to target")
-            self.sessions[session_id] = session
-
-        session = self.sessions[session_id]
-
-        # Read data from client
-        body = await request.read()
-        if body:
+        payload = await request.json()
+        result = []
+        for item in payload.get("sessions", []):
             try:
-                decoded = base64.b64decode(body)
-                session.add_data_from_client(decoded)
-                await session.flush_to_target()
-            except:
-                pass
+                session_id = item["session_id"]
+                target_host = item["target_host"]
+                target_port = int(item["target_port"])
 
-        # Limit response size as requested by client
-        response_data = session.get_data_for_client()[:max_response]
+                # Get or create session
+                if session_id not in self.sessions:
+                    if len(self.sessions) >= Config.MAX_SESSIONS:
+                        return web.Response(status=503, text="Too many sessions")
+            
+                    session = ProxySession(target_host, target_port)
+                    ok = await session.connect_to_target()
+                    if not ok:
+                        #2 return 502
+                        continue
+                    self.sessions[session_id] = session
 
-        encoded = base64.b64encode(response_data)
+                session = self.sessions[session_id]
 
-        return web.Response(
-            body=encoded,
-            headers={
-                "Content-Type": "application/octet-stream",
-                "X-Session-Active": "true"
-            }
-        )
+                body = item.get("data", "")
+                if body:
+                    decoded = base64.b64decode(body)
+                    if decoded:
+                        session.add_data_from_client(decoded)
+                        await session.flush_to_target()
+                response_data = session.get_data_for_client()
+                result.append({
+                    "session_id": session_id,
+                    "data": base64.b64encode(response_data).decode(),
+                })
+
+            except Exception as e:
+                print("batch item error", e)
+
+        return web.json_response({
+            "sessions": result
+        })
 
     def create_app(self):
         app = web.Application()
-        app.router.add_post("/proxy", self.handle_proxy)
+        app.router.add_post("/proxy", self.handle_batch)
         
         async def on_startup(app):
             await self.start_cleanup_task()
