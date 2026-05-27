@@ -203,7 +203,8 @@ class LocalProxyServer:
                 )
 
                 encoded_frame = base64.b64encode(bytes(frame))
-
+                if session_count == 0:
+                    continue
                 print(f"ONE REQUEST -> {session_count} sessions")
 
                 try:
