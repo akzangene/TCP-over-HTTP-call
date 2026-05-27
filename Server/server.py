@@ -103,29 +103,32 @@ class ProxyServer:
 
                 offset += 4
 
-                payload = body[
-                    offset:offset + payload_len
-                ]
-
+                payload = body[offset:offset + payload_len]
                 offset += payload_len
 
+                # 1. Non-blocking Session Initialization
                 if session_id not in self.sessions:
                     if len(self.sessions) >= Config.MAX_SESSIONS:
                         return web.Response(status=503, text="Too many sessions")
             
                     session = ProxySession(target_host, target_port)
-                    ok = await session.connect_to_target()
-                    if not ok:
-                        #2 return 502
-                        continue
                     self.sessions[session_id] = session
+                    
+                    # 🔥 NON-BLOCKING: Fire connection off to background
+                    session.start_connection()
 
                 session = self.sessions[session_id]
 
+                # 2. Drop dead sessions early
+                if session.connection_failed:
+                    continue
+
+                # 3. Queue data instantly (Flushing happens on a background task)
                 if payload:
                     session.add_data_from_client(payload)
-                    await session.flush_to_target()
-                response_data, consumed = (session.get_data_for_client_up_to(remaining_downlink))
+
+                # 4. Grab whatever is currently available in the buffer
+                response_data, consumed = session.get_data_for_client_up_to(remaining_downlink)
 
                 if not response_data:
                     continue
@@ -133,25 +136,12 @@ class ProxyServer:
                 sid = session_id.encode()
 
                 item = bytearray()
-
-                item += struct.pack(
-                    "!H",
-                    len(sid)
-                )
-
+                item += struct.pack("!H", len(sid))
                 item += sid
-
-                item += struct.pack(
-                    "!I",
-                    len(response_data)
-                )
-
+                item += struct.pack("!I", len(response_data))
                 item += response_data
-
                 response += item
-
                 response_count += 1
-
                 remaining_downlink -= consumed
 
             except Exception as e:

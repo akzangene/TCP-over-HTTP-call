@@ -14,21 +14,31 @@ class ProxySession:
         self.target_to_client = DataBuffer()
         self.last_activity = asyncio.get_event_loop().time()
         self.is_connected = False
-        self.target_closed = False   # ← New: tracks if target closed the connection
+        
+        # New: Tracking connection states
+        self.connecting_task = None
+        self.connection_failed = False
 
-    async def connect_to_target(self):
+    def start_connection(self):
+        """Spawns an independent background task to handle connection"""
+        self.connecting_task = asyncio.create_task(self._connect_task())
+
+    async def _connect_task(self):
         try:
             reader, writer = await asyncio.open_connection(
                 self.target_host, self.target_port
             )
             self.target_writer = writer
             self.is_connected = True
-            # Start forwarding task
+            
+            # Immediately flush any data that accumulated while we were connecting
+            if not self.client_to_target.is_empty():
+                self.flush_to_target_background()
+                
             asyncio.create_task(self._forward_from_target(reader))
-            return True
         except Exception as e:
-            print(f"[Session {self.session_id}] Target connection failed: {e}")
-            return False
+            print(f"[Session {self.session_id}] Connection failed: {e}")
+            self.connection_failed = True
 
     async def _forward_from_target(self, reader: asyncio.StreamReader):
         """Forward data FROM target to client buffer"""
@@ -50,11 +60,20 @@ class ProxySession:
     def add_data_from_client(self, data: bytes):
         self.client_to_target.add(data)
         self.last_activity = asyncio.get_event_loop().time()
+        
+        # New: Fire and forget flushing. Do not block HTTP loop for TCP drain.
+        if self.is_connected:
+            self.flush_to_target_background()
+
+    def flush_to_target_background(self):
+        """Spawns a fire-and-forget task to write data out to the network"""
+        asyncio.create_task(self._flush_task())
 
     def get_data_for_client_up_to(self, max_size: int) -> bytes:
         return self.target_to_client.get_up_to(max_size)
 
-    async def flush_to_target(self):
+
+    async def _flush_task(self):
         if not self.target_writer or self.client_to_target.is_empty():
             return
         data = self.client_to_target.get_all()
@@ -63,7 +82,6 @@ class ProxySession:
             await self.target_writer.drain()
         except Exception:
             self.is_connected = False
-            self.target_closed = True
 
     def is_expired(self) -> bool:
         # Close session faster if target already closed the connection
