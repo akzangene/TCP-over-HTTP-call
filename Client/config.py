@@ -17,7 +17,7 @@ class Config:
     # Security
     AUTH_TOKEN = "change_me_in_production"
 
-        # === Relay Mode (GAS) ===
+    # === Relay Mode (GAS) ===
     RELAY_MODE = False                    # Set to True to use Google Apps Script relay
     RELAY_URLS = [                        # Add your GAS Web App URLs here
         "https://script.google.com/macros/s/YOUR_GAS_URL_1/exec",

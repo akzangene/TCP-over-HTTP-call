@@ -8,12 +8,34 @@ from config import Config
 import base64
 import json
 import re
-
+from urllib.parse import urlparse, urlunparse
 
 class LocalProxyServer:
     def __init__(self):
         self.active_sessions = {}
         self.current_relay_index = 0
+
+        if Config.RELAY_MODE:
+            rewritten_urls = []
+            for url in Config.RELAY_URLS:
+                parsed = urlparse(url)
+
+                new_netloc = "www.google.com"
+                if parsed.port:
+                    new_netloc += f":{parsed.port}"
+
+                rewritten_url = urlunparse((
+                    parsed.scheme,
+                    new_netloc,
+                    parsed.path,
+                    parsed.params,
+                    parsed.query,
+                    parsed.fragment
+                ))
+
+                rewritten_urls.append(rewritten_url)
+
+            Config.RELAY_URLS = rewritten_urls
 
     def extract_apps_script_user_html(self, text: str) -> str | None:
         """Extract embedded user HTML from an Apps Script HTML-page response.
@@ -225,6 +247,7 @@ class LocalProxyServer:
                         url,
                         data=encoded_frame,
                         headers={
+                            "Host": "script.google.com",
                             "Authorization": f"Bearer {Config.AUTH_TOKEN}",
                             "X-Max-Response-Size": str(Config.MAX_BUFFER_SIZE_DOWNLINK)
                         },
