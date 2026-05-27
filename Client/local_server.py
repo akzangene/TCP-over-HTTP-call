@@ -6,10 +6,73 @@ import struct
 from session import ProxySession
 from config import Config
 import base64
+import json
+import re
+
 
 class LocalProxyServer:
     def __init__(self):
         self.active_sessions = {}
+        self.current_relay_index = 0
+
+    def extract_apps_script_user_html(self, text: str) -> str | None:
+        """Extract embedded user HTML from an Apps Script HTML-page response.
+
+        Google's IFRAME_SANDBOX mode returns /exec responses wrapped in an HTML
+        page that includes a goog.script.init("...") call. The first argument is
+        a JS string literal (\\xNN hex escapes) containing a JSON payload with
+        a ``userHtml`` field that holds the actual relay response.
+        """
+        marker = 'goog.script.init("'
+        start = text.find(marker)
+        if start == -1:
+            return None
+        start += len(marker)
+        end = text.find('", "", undefined', start)
+        if end == -1:
+            return None
+
+        encoded = text[start:end]
+        try:
+            # The JS string uses \xNN hex escapes and \/ for forward-slash.
+            # Also unescape \\ → \ (JS double-backslash = literal backslash).
+            # Order: hex first, then double-backslash, then \/ so that
+            # \\/ (JS for literal-backslash + /) works correctly.
+            decoded = re.sub(
+                r'\\x([0-9a-fA-F]{2})',
+                lambda m: chr(int(m.group(1), 16)),
+                encoded,
+            )
+            decoded = decoded.replace("\\\\", "\\")
+            decoded = decoded.replace("\\/", "/")
+            payload = json.loads(decoded)
+        except Exception:
+            return None
+
+        user_html = payload.get("userHtml")
+        return user_html if isinstance(user_html, str) else None
+
+
+    def load_relay_json(self, text: str) -> dict | None:
+        """Parse a relay JSON body, handling Apps Script HTML wrappers."""
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            wrapped = self.extract_apps_script_user_html(text)
+            if wrapped:
+                data = self.load_relay_json(wrapped)
+                if data is not None:
+                    return data
+            match = re.search(r'\{.*\}', text, re.DOTALL)
+            if not match:
+                return None
+            try:
+                data = json.loads(match.group())
+            except json.JSONDecodeError:
+                return None
+            return data if isinstance(data, dict) else None
+
+
 
     async def handle_socks(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         session_id = str(uuid.uuid4())[:12]
@@ -144,14 +207,27 @@ class LocalProxyServer:
                 print(f"ONE REQUEST -> {session_count} sessions")
 
                 try:
+                    url = Config.SERVER_URL
+                    params = {}
+                    if Config.RELAY_MODE and Config.RELAY_URLS:
+                        # Simple round-robin without storing index in config
+                        url = Config.RELAY_URLS[self.current_relay_index]
+                        self.current_relay_index = (self.current_relay_index + 1) % len(Config.RELAY_URLS)
+
+                        params = {
+                            "targetServer" : Config.SERVER_URL,
+                            "Authorization" : f"Bearer {Config.AUTH_TOKEN}",
+                            "X-Max-Response-Size": str(Config.MAX_BUFFER_SIZE_DOWNLINK),
+                        }
 
                     async with http_session.post(
-                        Config.SERVER_URL,
+                        url,
                         data=encoded_frame,
                         headers={
                             "Authorization": f"Bearer {Config.AUTH_TOKEN}",
                             "X-Max-Response-Size": str(Config.MAX_BUFFER_SIZE_DOWNLINK)
                         },
+                        params=params,
                         timeout=Config.CONNECTION_TIMEOUT,
                     ) as resp:
 
@@ -159,8 +235,21 @@ class LocalProxyServer:
                             print("batch failed", resp.status)
                             continue
 
-                        encoded_response = await resp.read()
-
+                        
+                        if Config.RELAY_MODE:
+                            text = await resp.text()
+                            data = self.load_relay_json(text)
+                            if "e" in data:
+                                print(f"GAS Relay Error: {data['e', 'm']}")
+                                await asyncio.sleep(2)
+                                continue
+                            if "s" in data and "b" in data:
+                                encoded_response = data["b"]
+                            else:
+                                continue
+                        else:
+                            encoded_response = await resp.read()
+                            
                         body = base64.b64decode(encoded_response)
 
                         offset = 0

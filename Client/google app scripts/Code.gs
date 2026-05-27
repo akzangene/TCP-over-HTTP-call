@@ -19,9 +19,6 @@ function doPost(e) {
       method: "post",
       headers: {
         "Authorization": auth,
-        "X-Session-ID": e.parameter["X-Session-ID"],
-        "X-Target-Host": e.parameter["X-Target-Host"],
-        "X-Target-Port": e.parameter["X-Target-Port"],
         "X-Max-Response-Size": e.parameter["X-Max-Response-Size"]
       },
       payload: e.postData && e.postData.contents,
