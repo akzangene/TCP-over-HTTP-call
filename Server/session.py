@@ -18,6 +18,7 @@ class ProxySession:
         # New: Tracking connection states
         self.connecting_task = None
         self.connection_failed = False
+        self.target_closed = False   # ← New: tracks if target closed the connection
 
     def start_connection(self):
         """Spawns an independent background task to handle connection"""
@@ -82,6 +83,7 @@ class ProxySession:
             await self.target_writer.drain()
         except Exception:
             self.is_connected = False
+            self.target_closed = True
 
     def is_expired(self) -> bool:
         # Close session faster if target already closed the connection
