@@ -4,6 +4,7 @@ import asyncio
 from session import ProxySession
 from config import Config
 import base64
+import struct
 
 class ProxyServer:
     def __init__(self):
@@ -30,17 +31,84 @@ class ProxyServer:
         if token != f"Bearer {Config.AUTH_TOKEN}":
             return web.Response(status=401, text="Unauthorized")
 
-        #1 max_response_size = int(request.headers.get("X-Max-Response-Size"))
+        remaining_downlink = int(request.headers.get("X-Max-Response-Size"))
 
-        payload = await request.json()
-        result = []
-        for item in payload.get("sessions", []):
+        encoded_body = await request.read()
+
+        body = base64.b64decode(
+            encoded_body
+        )
+
+        offset = 0
+
+        count = struct.unpack_from(
+            "!I",
+            body,
+            offset
+        )[0]
+
+        offset += 4
+
+        response = bytearray()
+
+        response += struct.pack("!I", 0)
+
+        response_count = 0
+
+        for _ in range(count):
+
             try:
-                session_id = item["session_id"]
-                target_host = item["target_host"]
-                target_port = int(item["target_port"])
 
-                # Get or create session
+                sid_len = struct.unpack_from(
+                    "!H",
+                    body,
+                    offset
+                )[0]
+
+                offset += 2
+
+                session_id = body[
+                    offset:offset + sid_len
+                ].decode()
+
+                offset += sid_len
+
+                host_len = struct.unpack_from(
+                    "!H",
+                    body,
+                    offset
+                )[0]
+
+                offset += 2
+
+                target_host = body[
+                    offset:offset + host_len
+                ].decode()
+
+                offset += host_len
+
+                target_port = struct.unpack_from(
+                    "!H",
+                    body,
+                    offset
+                )[0]
+
+                offset += 2
+
+                payload_len = struct.unpack_from(
+                    "!I",
+                    body,
+                    offset
+                )[0]
+
+                offset += 4
+
+                payload = body[
+                    offset:offset + payload_len
+                ]
+
+                offset += payload_len
+
                 if session_id not in self.sessions:
                     if len(self.sessions) >= Config.MAX_SESSIONS:
                         return web.Response(status=503, text="Too many sessions")
@@ -54,24 +122,55 @@ class ProxyServer:
 
                 session = self.sessions[session_id]
 
-                body = item.get("data", "")
-                if body:
-                    decoded = base64.b64decode(body)
-                    if decoded:
-                        session.add_data_from_client(decoded)
-                        await session.flush_to_target()
-                response_data = session.get_data_for_client()
-                result.append({
-                    "session_id": session_id,
-                    "data": base64.b64encode(response_data).decode(),
-                })
+                if payload:
+                    session.add_data_from_client(payload)
+                    await session.flush_to_target()
+                response_data, consumed = (session.get_data_for_client_up_to(remaining_downlink))
+
+                if not response_data:
+                    continue
+
+                sid = session_id.encode()
+
+                item = bytearray()
+
+                item += struct.pack(
+                    "!H",
+                    len(sid)
+                )
+
+                item += sid
+
+                item += struct.pack(
+                    "!I",
+                    len(response_data)
+                )
+
+                item += response_data
+
+                response += item
+
+                response_count += 1
+
+                remaining_downlink -= consumed
 
             except Exception as e:
                 print("batch item error", e)
 
-        return web.json_response({
-            "sessions": result
-        })
+        struct.pack_into(
+            "!I",
+            response,
+            0,
+            response_count
+        )
+
+        encoded_response = base64.b64encode(
+            bytes(response)
+        )
+
+        return web.Response(
+            body=encoded_response
+        )
 
     def create_app(self):
         app = web.Application()

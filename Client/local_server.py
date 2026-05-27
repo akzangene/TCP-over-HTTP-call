@@ -91,37 +91,63 @@ class LocalProxyServer:
 
                 await asyncio.sleep(Config.POLL_INTERVAL)
 
-                remaining_budget = Config.MAX_BUFFER_SIZE_UPLINK
+                frame = bytearray()
 
-                payload = []
+                frame += struct.pack("!I", 0)
+
+                session_count = 0
+
+                remaining_budget = Config.MAX_BUFFER_SIZE_UPLINK
 
                 for session_id, session in list(self.active_sessions.items()):
 
                     outgoing, consumed = session.client_to_server.get_up_to(remaining_budget)
 
-                    payload.append({
-                        "session_id": session_id,
-                        "target_host": session.target_host,
-                        "target_port": session.target_port,
-                        "data": base64.b64encode(outgoing).decode()
-                    })
+                    sid = session_id.encode()
+                    host = session.target_host.encode()
+
+                    item = bytearray()
+
+                    item += struct.pack("!H", len(sid))
+                    item += sid
+
+                    item += struct.pack("!H", len(host))
+                    item += host
+
+                    item += struct.pack(
+                        "!H",
+                        session.target_port
+                    )
+
+                    item += struct.pack(
+                        "!I",
+                        len(outgoing)
+                    )
+
+                    item += outgoing
+
+                    frame += item
+
+                    session_count += 1
 
                     remaining_budget -= consumed
 
-                    if remaining_budget < 0:
-                        break
+                struct.pack_into(
+                    "!I",
+                    frame,
+                    0,
+                    session_count
+                )
 
+                encoded_frame = base64.b64encode(bytes(frame))
 
-                if not payload:
-                    continue
-
-                print(f"ONE REQUEST -> {len(payload)} sessions")
+                print(f"ONE REQUEST -> {session_count} sessions")
 
                 try:
 
                     async with http_session.post(
                         Config.SERVER_URL,
-                        json={"sessions": payload},
+                        data=encoded_frame,
                         headers={
                             "Authorization": f"Bearer {Config.AUTH_TOKEN}",
                             "X-Max-Response-Size": str(Config.MAX_BUFFER_SIZE_DOWNLINK)
@@ -133,26 +159,57 @@ class LocalProxyServer:
                             print("batch failed", resp.status)
                             continue
 
-                        result = await resp.json()
+                        encoded_response = await resp.read()
 
-                        for item in result.get("sessions", []):
+                        body = base64.b64decode(encoded_response)
 
-                            sid = item["session_id"]
+                        offset = 0
+
+                        count = struct.unpack_from(
+                            "!I",
+                            body,
+                            offset
+                        )[0]
+
+                        offset += 4
+
+                        for _ in range(count):
+
+                            sid_len = struct.unpack_from(
+                                "!H",
+                                body,
+                                offset
+                            )[0]
+
+                            offset += 2
+
+                            sid = body[
+                                offset:offset + sid_len
+                            ].decode()
+
+                            offset += sid_len
+
+                            payload_len = struct.unpack_from(
+                                "!I",
+                                body,
+                                offset
+                            )[0]
+
+                            offset += 4
+
+                            payload = body[
+                                offset:offset + payload_len
+                            ]
+
+                            offset += payload_len
 
                             if sid not in self.active_sessions:
                                 continue
 
                             session = self.active_sessions[sid]
 
-                            body = item.get("data", "")
-
-                            if not body:
-                                continue
-
-                            decoded = base64.b64decode(body)
-
-                            if decoded and session.local_writer:
-                                session.local_writer.write(decoded)
+                            if payload and session.local_writer:
+                                session.local_writer.write(payload)
                                 await session.local_writer.drain()
 
                 except Exception as e:

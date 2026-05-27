@@ -51,8 +51,8 @@ class ProxySession:
         self.client_to_target.add(data)
         self.last_activity = asyncio.get_event_loop().time()
 
-    def get_data_for_client(self) -> bytes:
-        return self.target_to_client.get_all()
+    def get_data_for_client_up_to(self, max_size: int) -> bytes:
+        return self.target_to_client.get_up_to(max_size)
 
     async def flush_to_target(self):
         if not self.target_writer or self.client_to_target.is_empty():

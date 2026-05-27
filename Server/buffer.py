@@ -23,6 +23,49 @@ class DataBuffer:
         self.last_flush = time.time()
         return data
 
+    def get_up_to(self, max_size: int) -> tuple[bytes, int]:
+
+        if not self.buffer or max_size <= 0:
+            return b'', 0
+
+        if self.total_size <= max_size:
+            data = self.get_all()
+            return data, len(data)
+
+        data_list = []
+        remaining = max_size
+
+        while self.buffer and remaining > 0:
+
+            chunk = self.buffer.popleft()
+
+            if len(chunk) <= remaining:
+
+                data_list.append(chunk)
+
+                remaining -= len(chunk)
+
+            else:
+
+                take = chunk[:remaining]
+                leftover = chunk[remaining:]
+
+                data_list.append(take)
+
+                self.buffer.appendleft(leftover)
+
+                remaining = 0
+
+        data = b''.join(data_list)
+
+        consumed = len(data)
+
+        self.total_size -= consumed
+
+        self.last_flush = time.time()
+
+        return data, consumed
+
     def should_flush(self, max_size: int, interval: float) -> bool:
         if self.total_size >= max_size:
             return True
