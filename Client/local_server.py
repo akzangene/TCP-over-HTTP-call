@@ -9,6 +9,7 @@ import base64
 import json
 import re
 from urllib.parse import urlparse, urlunparse
+import time
 
 class LocalProxyServer:
     def __init__(self):
@@ -36,6 +37,8 @@ class LocalProxyServer:
                 rewritten_urls.append(rewritten_url)
 
             Config.RELAY_URLS = rewritten_urls
+        
+        self.timeElapsed = time.perf_counter()
 
     def extract_apps_script_user_html(self, text: str) -> str | None:
         """Extract embedded user HTML from an Apps Script HTML-page response.
@@ -174,7 +177,12 @@ class LocalProxyServer:
 
             while True:
 
-                await asyncio.sleep(Config.POLL_INTERVAL)
+                self.timeElapsed = time.perf_counter() - self.timeElapsed
+                time_remaining = Config.POLL_INTERVAL - self.timeElapsed
+                if time_remaining > 0:
+                    await asyncio.sleep(time_remaining)    
+                
+                self.timeElapsed = time.perf_counter()
 
                 frame = bytearray()
 
