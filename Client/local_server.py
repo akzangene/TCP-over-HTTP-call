@@ -253,6 +253,7 @@ class LocalProxyServer:
                         },
                         params=params,
                         timeout=Config.CONNECTION_TIMEOUT,
+                        compress="gzip"
                     ) as resp:
 
                         if resp.status != 200:

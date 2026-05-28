@@ -158,9 +158,13 @@ class ProxyServer:
             bytes(response)
         )
 
-        return web.Response(
+        resp = web.Response(
             body=encoded_response
         )
+        
+        resp.enable_compression()
+        
+        return resp
 
     def create_app(self):
         app = web.Application()
