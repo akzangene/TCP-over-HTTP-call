@@ -162,7 +162,7 @@ class ProxyServer:
             body=encoded_response
         )
         
-        resp.enable_compression()
+        resp.enable_compression(web.ContentCoding.gzip)
         
         return resp
 
